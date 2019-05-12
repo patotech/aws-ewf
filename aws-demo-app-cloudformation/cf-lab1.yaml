@@ -1,0 +1,433 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Laboratory template for a basic web architecture
+
+## ##########################################################################
+## Template parameters (Remmember, the maximum number of params is 60)
+## ##########################################################################
+Parameters: 
+  # Cidr for the VPC
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+    Description: Specify a base CIDR for the VPC
+  # Instance type for the EC2 instance creation
+  InstanceType: 
+    Type: String
+    Default: t2.micro
+    AllowedValues: 
+      - t2.micro
+      - t2.small
+      - t2.large
+    Description: Enter the instance type to be deployed by this template
+  # AZ for the public zones
+  PublicAzOne:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Description: Availability zone for the public subnet
+  PublicAzTwo:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Description: Availability zone for the public subnet
+  # AZ for the private zone
+  PrivateAz:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Description: Availability zone for the private subnet
+  StackMotif:
+    Type: String
+    Description: The keyword for describing the motivation to create the stack
+  StackClient:
+    Type: String
+    Description: ID of the client that requested the stack
+  StackProject:
+    Type: String
+    Description: ID of the project that generated the stack
+  StackNamePrefix:
+    Type: String
+    Description: A prefix for all name tags in resources for this project
+
+## ##########################################################################
+## Resources
+## ##########################################################################
+Resources:
+
+  ## ##########################################################################
+  ## Resources - IAM
+  ## ##########################################################################
+  # Managed Instance Role
+  LabManagedEc2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+              - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM
+
+  ## ##########################################################################
+  ## Resources - Networking
+  ## ##########################################################################
+  ## 
+  ## VPC Definition
+  ##
+  # VPC for component deployment
+  LabVpc:
+    Type: AWS::EC2::VPC
+    Properties: 
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: false
+      InstanceTenancy: "default"
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref StackNamePrefix , "vpc-lab-1" ]]
+      - Key: Motif
+        Value: !Ref StackMotif
+      - Key: Client
+        Value: !Ref StackClient
+      - Key: Project
+        Value: !Ref StackProject
+
+  ## 
+  ## Subnets
+  ##
+  # Private subnet for the RDS database
+  LabPrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: LabVpc
+      CidrBlock: !Select [ 0, !Cidr [ !GetAtt LabVpc.CidrBlock, 3, 8 ] ]
+      AvailabilityZone: !Ref PrivateAz
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref StackNamePrefix , "sn-private-lab-1" ]]
+      - Key: Motif
+        Value: !Ref StackMotif
+      - Key: Client
+        Value: !Ref StackClient
+      - Key: Project
+        Value: !Ref StackProject
+
+  # Public subnets for the web application
+  LabPublicSubnetOne:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: LabVpc
+      CidrBlock: !Select [ 1, !Cidr [ !GetAtt LabVpc.CidrBlock, 3, 8 ] ]
+      AvailabilityZone: !Ref PublicAzOne
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref StackNamePrefix , "sn-public-01-lab-1" ]]
+      - Key: Motif
+        Value: !Ref StackMotif
+      - Key: Client
+        Value: !Ref StackClient
+      - Key: Project
+        Value: !Ref StackProject
+
+  LabPublicSubnetTwo:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: LabVpc
+      CidrBlock: !Select [ 2, !Cidr [ !GetAtt LabVpc.CidrBlock, 3, 8 ] ]
+      AvailabilityZone: !Ref PublicAzTwo
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref StackNamePrefix , "sn-public-02-lab-1" ]]
+      - Key: Motif
+        Value: !Ref StackMotif
+      - Key: Client
+        Value: !Ref StackClient
+      - Key: Project
+        Value: !Ref StackProject
+
+  ## 
+  ## Security Groups
+  ##
+  # Web Servers security groups
+  LabElbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allo traffic from Internet to the ELB
+      VpcId:
+        Ref: LabVpc
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref StackNamePrefix , "sg-elb-1" ]]
+      - Key: Motif
+        Value: !Ref StackMotif
+      - Key: Client
+        Value: !Ref StackClient
+      - Key: Project
+        Value: !Ref StackProject
+
+  # Web Servers security groups
+  LabWebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http to client host
+      VpcId:
+        Ref: LabVpc
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 8080
+        ToPort: 8080
+        SourceSecurityGroupId: !Ref LabElbSecurityGroup
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+      - IpProtocol: -1
+        CidrIp: 0.0.0.0/0
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref StackNamePrefix , "sg-webapp-1" ]]
+      - Key: Motif
+        Value: !Ref StackMotif
+      - Key: Client
+        Value: !Ref StackClient
+      - Key: Project
+        Value: !Ref StackProject
+
+  ## 
+  ## VPC Gateways
+  ##
+  # Internet Gateway
+  LabInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref StackNamePrefix , "igw-webapp-1" ]]
+      - Key: Motif
+        Value: !Ref StackMotif
+      - Key: Client
+        Value: !Ref StackClient
+      - Key: Project
+        Value: !Ref StackProject
+
+  # Internet Gateway Attachment
+  LabInternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: 
+      InternetGatewayId: !Ref LabInternetGateway
+      VpcId: !Ref LabVpc
+
+  # Public Subnet Route Table
+  LabSubNetInternetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: LabVpc
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref StackNamePrefix , "public-routetable-webapp-1" ]]
+      - Key: Motif
+        Value: !Ref StackMotif
+      - Key: Client
+        Value: !Ref StackClient
+      - Key: Project
+        Value: !Ref StackProject
+
+  # Internet Route for Public Table
+  LabRoutePublicInteret:
+    Type: AWS::EC2::Route
+    DependsOn: LabInternetGateway
+    Properties:
+       RouteTableId:
+         Ref: LabSubNetInternetRouteTable
+       DestinationCidrBlock: 0.0.0.0/0
+       GatewayId:
+         Ref: LabInternetGateway
+
+  # Public Subnet One Internet Route Association
+  LabSubnetOneRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: LabPublicSubnetOne
+      RouteTableId:
+        Ref: LabSubNetInternetRouteTable  
+
+  # Public Subnet Two Internet Route Association
+  LabSubnetTwoRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: LabPublicSubnetTwo
+      RouteTableId:
+        Ref: LabSubNetInternetRouteTable  
+
+  ## ##########################################################################
+  ## Resources - Instances
+  ## ##########################################################################
+  # EC2 Instance Profile - IAM
+  LabEc2WebApplicationInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    DependsOn: LabManagedEc2Role
+    Properties:
+      InstanceProfileName: LabEc2WebApplicationInstanceProfile
+      Path: /
+      Roles:
+      - Ref: LabManagedEc2Role
+
+  # EC2 Instance for Web Application
+  LabEc2WebApplicationInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0de53d8956e8dcf80
+      KeyName: win-home-key-pair-studio
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref LabEc2WebApplicationInstanceProfile
+      BlockDeviceMappings: 
+        - DeviceName: /dev/sdm
+          Ebs: 
+            VolumeType: io1
+            Iops: 200
+            DeleteOnTermination: true
+            VolumeSize: 20
+        - DeviceName: /dev/sdk
+          NoDevice: {}
+      NetworkInterfaces: 
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: 0
+          GroupSet:
+          - Ref: LabWebSecurityGroup
+          SubnetId:
+            Ref: LabPublicSubnetOne
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #!/bin/bash -xe
+            exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+              sudo yum -y update
+              sudo yum -y install java-1.8.0
+              sudo useradd -r -m -U -d /opt/tomcat -s /bin/false tomcat
+              wget https://www-us.apache.org/dist/tomcat/tomcat-9/v9.0.19/bin/apache-tomcat-9.0.19.tar.gz -P /tmp
+              sudo tar xf /tmp/apache-tomcat-9*.tar.gz -C /opt/tomcat
+              sudo ln -s /opt/tomcat/apache-tomcat-9.0.19 /opt/tomcat/latest
+              sudo chown -RH tomcat:tomcat /opt/tomcat/latest
+              sudo sh -c 'chmod +x /opt/tomcat/latest/bin/*.sh'
+              sudo echo '[Unit]' > /tmp/tomcat.service
+              sudo echo 'Description=Tomcat 9 servlet container' >> /tmp/tomcat.service
+              sudo echo 'After=network.target' >> /tmp/tomcat.service
+              sudo echo '' >> /tmp/tomcat.service
+              sudo echo '[Service]' >> /tmp/tomcat.service
+              sudo echo 'Type=forking' >> /tmp/tomcat.service
+              sudo echo '' >> /tmp/tomcat.service
+              sudo echo 'User=tomcat' >> /tmp/tomcat.service
+              sudo echo 'Group=tomcat' >> /tmp/tomcat.service
+              sudo echo '' >> /tmp/tomcat.service
+              sudo echo 'Environment="JAVA_HOME=/usr/lib/jvm/jre"' >> /tmp/tomcat.service
+              sudo echo 'Environment="JAVA_OPTS=-Djava.security.egd=file:///dev/urandom -Djava.awt.headless=true"' >> /tmp/tomcat.service
+              sudo echo '' >> /tmp/tomcat.service
+              sudo echo 'Environment="CATALINA_BASE=/opt/tomcat/latest"' >> /tmp/tomcat.service
+              sudo echo 'Environment="CATALINA_HOME=/opt/tomcat/latest"' >> /tmp/tomcat.service
+              sudo echo 'Environment="CATALINA_PID=/opt/tomcat/latest/temp/tomcat.pid"' >> /tmp/tomcat.service
+              sudo echo 'Environment="CATALINA_OPTS=-Xms512M -Xmx1024M -server -XX:+UseParallelGC"' >> /tmp/tomcat.service
+              sudo echo '' >> /tmp/tomcat.service
+              sudo echo 'ExecStart=/opt/tomcat/latest/bin/startup.sh' >> /tmp/tomcat.service
+              sudo echo 'ExecStop=/opt/tomcat/latest/bin/shutdown.sh' >> /tmp/tomcat.service
+              sudo echo '' >> /tmp/tomcat.service
+              sudo echo '[Install]' >> /tmp/tomcat.service
+              sudo echo 'WantedBy=multi-user.target' >> /tmp/tomcat.service
+              sudo mv /tmp/tomcat.service /etc/systemd/system/tomcat.service
+              sudo chown root:root /etc/systemd/system/tomcat.service
+              sudo systemctl daemon-reload
+              sudo systemctl start tomcat
+              sudo systemctl enable tomcat
+              sudo yum install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref StackNamePrefix , "ec2-webapp-1" ]]
+      - Key: Motif
+        Value: !Ref StackMotif
+      - Key: Client
+        Value: !Ref StackClient
+      - Key: Project
+        Value: !Ref StackProject    
+
+  ## ##########################################################################
+  ## Resources - RDS
+  ## ##########################################################################
+
+  ## ##########################################################################
+  ## Resources - Web
+  ## ##########################################################################
+
+  ## 
+  ## Elastic Load Balancer
+  ##
+  # Web ELB
+  LabElasticLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      Subnets:
+      - Ref: LabPublicSubnetOne
+      - Ref: LabPublicSubnetTwo
+      LoadBalancerAttributes:
+      - Key: idle_timeout.timeout_seconds
+        Value: '50'      
+      IpAddressType: ipv4
+      Name: !Join [ "-", [ !Ref StackNamePrefix , "elb-webapp-1" ]]
+      SecurityGroups:
+      - Ref: LabElbSecurityGroup
+      Type: application
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref StackNamePrefix , "elb-webapp-1" ]]
+      - Key: Motif
+        Value: !Ref StackMotif
+      - Key: Client
+        Value: !Ref StackClient
+      - Key: Project
+        Value: !Ref StackProject
+
+  # ELB Listener
+  LabElasticLoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LabElasticLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref LabElasticLoadBalancerTargetGroup
+
+  # ELB Target Group
+  LabElasticLoadBalancerTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Join [ "-", [ !Ref StackNamePrefix , "elb-tg-1" ]]
+      VpcId: !Ref LabVpc
+      Port: 80
+      Protocol: HTTP
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ !Ref StackNamePrefix , "elb-tg-1" ]]
+      - Key: Motif
+        Value: !Ref StackMotif
+      - Key: Client
+        Value: !Ref StackClient
+      - Key: Project
+        Value: !Ref StackProject      

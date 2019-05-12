@@ -1,0 +1,238 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Laboratory for creating AWS Code Commit repositories for the workshop
+
+## ##########################################################################
+## Template parameters (Remmember, the maximum number of params is 60)
+## ##########################################################################
+Parameters: 
+  # Cidr for the VPC
+  AppBucketName:
+    Type: String
+    Description: Specify a base CIDR for the VPC
+
+## ##########################################################################
+## Resources
+## ##########################################################################
+Resources:
+
+  # Code Repository
+  LabInfraRepo:
+    Type: AWS::CodeCommit::Repository
+    Properties:
+      RepositoryName: LabInfraRepo
+      RepositoryDescription: Git Repository for infrastructure templates
+  
+  # Service Role
+  LabManagedBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+              - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSCodeCommitFullAccess
+        - arn:aws:iam::aws:policy/CloudWatchFullAccess
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+
+  # Service Role
+  LabManagedDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+              - codedeploy.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSCodeCommitFullAccess
+        - arn:aws:iam::aws:policy/CloudWatchFullAccess
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole
+
+  # Service Role
+  LabManagedPipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: AWS-CodePipeline-Service-3
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'codecommit:CancelUploadArchive'
+                  - 'codecommit:GetBranch'
+                  - 'codecommit:GetCommit'
+                  - 'codecommit:GetUploadArchiveStatus'
+                  - 'codecommit:UploadArchive'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'codedeploy:CreateDeployment'
+                  - 'codedeploy:GetApplicationRevision'
+                  - 'codedeploy:GetDeployment'
+                  - 'codedeploy:GetDeploymentConfig'
+                  - 'codedeploy:RegisterApplicationRevision'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'codebuild:BatchGetBuilds'
+                  - 'codebuild:StartBuild'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'devicefarm:ListProjects'
+                  - 'devicefarm:ListDevicePools'
+                  - 'devicefarm:GetRun'
+                  - 'devicefarm:GetUpload'
+                  - 'devicefarm:CreateUpload'
+                  - 'devicefarm:ScheduleRun'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'lambda:InvokeFunction'
+                  - 'lambda:ListFunctions'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'iam:PassRole'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'elasticbeanstalk:*'
+                  - 'ec2:*'
+                  - 'elasticloadbalancing:*'
+                  - 'autoscaling:*'
+                  - 'cloudwatch:*'
+                  - 's3:*'
+                  - 'sns:*'
+                  - 'cloudformation:*'
+                  - 'rds:*'
+                  - 'sqs:*'
+                  - 'ecs:*'
+                Resource: '*'
+
+  # Code Build
+  LabInfraCodeBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: MonoliticWebApp
+      Description: An example application build for a Java Spring
+      ServiceRole: !GetAtt LabManagedBuildRole.Arn
+      TimeoutInMinutes: 10
+      Source:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/java:openjdk-8
+        EnvironmentVariables:
+        - Name: S3_ARTIFACT_BUCKET
+          Value: !Ref AppBucketName
+      Artifacts:
+        Type: CODEPIPELINE
+
+  # Code Deploy
+  LabInfraCodeDeployApplication:
+    Type: AWS::CodeDeploy::Application
+    Properties:
+      ApplicationName: webapp-evolution-app
+      ComputePlatform: Server
+  
+  # Code Deploy: Deployment Group
+  LabInfraCodeDeployDeploymentGroup:
+    Type: AWS::CodeDeploy::DeploymentGroup
+    DependsOn: LabInfraCodeDeployApplication
+    Properties:
+      ApplicationName: !Ref LabInfraCodeDeployApplication
+      DeploymentGroupName: webapp-evolution-app-deployment-group
+      Ec2TagFilters:
+        - Key: Motif
+          Value: ewf-lab-3
+          Type: KEY_AND_VALUE
+      ServiceRoleArn: !GetAtt LabManagedDeployRole.Arn
+
+  # Code Pipeline
+  # Ref: https://docs.aws.amazon.com/codepipeline/latest/userguide/reference-pipeline-structure.html#actions-valid-providers
+  LabInfraCodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: webapp-evolution-app-codepipeline
+      RoleArn: !GetAtt LabManagedPipelineRole.Arn
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Checkout
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: 1
+                Provider: CodeCommit
+              OutputArtifacts:
+                - Name: SourceOutput
+              Configuration:
+                BranchName: master
+                RepositoryName: LabInfraRepo
+                PollForSourceChanges: true
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: BuildApplication
+              InputArtifacts:
+                - Name: SourceOutput
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              OutputArtifacts:
+                - Name: CompiledApplication
+              Configuration:
+                ProjectName: !Ref LabInfraCodeBuild
+              RunOrder: 1
+        - Name: Deploy
+          Actions:
+            - Name: DeployApplication
+              InputArtifacts:
+                - Name: CompiledApplication
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CodeDeploy
+              Configuration:
+                ApplicationName: !Ref LabInfraCodeDeployApplication
+                DeploymentGroupName: !Ref LabInfraCodeDeployDeploymentGroup                
+              RunOrder: 1
+      ArtifactStore:
+        Type: S3
+        Location: !Ref LabAppS3Bucket
+
+
+  LabAppS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref AppBucketName

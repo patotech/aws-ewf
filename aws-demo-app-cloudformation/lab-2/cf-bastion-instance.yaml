@@ -1,0 +1,123 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Bastion instance laboratory
+
+## ##########################################################################
+## Resources
+## ##########################################################################
+Resources:
+  ## ##########################################################################
+  ## Resources - Networking
+  ## ##########################################################################
+  ## 
+  ## VPC Definition
+  ##
+  # VPC for component deployment
+  LabVpc:
+    Type: AWS::EC2::VPC
+    Properties: 
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: false
+      InstanceTenancy: "default"
+
+  ## 
+  ## Subnets
+  ##
+  # Private subnet for the RDS database
+  LabSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: LabVpc
+      CidrBlock: 10.0.0.0/24
+      AvailabilityZone: us-east-1a
+
+  ## 
+  ## Security Groups
+  ##
+  # Bastion security group
+  LabSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow traffic from Internet to instance using SSH
+      VpcId:
+        Ref: LabVpc
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+      - IpProtocol: -1
+        CidrIp: 0.0.0.0/0
+
+  ## 
+  ## VPC Gateways
+  ##
+  # Internet Gateway
+  LabInternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  # Internet Gateway Attachment
+  LabInternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: 
+      InternetGatewayId: !Ref LabInternetGateway
+      VpcId: !Ref LabVpc
+
+  # Public Subnet Route Table
+  LabSubNetInternetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: LabVpc
+
+  # Internet Route for Public Table
+  LabRoutePublicInternet:
+    Type: AWS::EC2::Route
+    DependsOn: LabInternetGateway
+    Properties:
+       RouteTableId:
+         Ref: LabSubNetInternetRouteTable
+       DestinationCidrBlock: 0.0.0.0/0
+       GatewayId:
+         Ref: LabInternetGateway
+
+  # Public Subnet One Internet Route Association
+  LabSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: LabSubnet
+      RouteTableId:
+        Ref: LabSubNetInternetRouteTable
+
+  # EC2 Instance for the Bastion Instance
+  LabEc2BastionInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0de53d8956e8dcf80
+      KeyName: ewf-key
+      InstanceType: t2.micro
+      BlockDeviceMappings: 
+        - DeviceName: /dev/sdm
+          Ebs: 
+            VolumeType: io1
+            Iops: 200
+            DeleteOnTermination: true
+            VolumeSize: 20
+        - DeviceName: /dev/sdk
+          NoDevice: {}
+      NetworkInterfaces: 
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: 0
+          GroupSet:
+          - Ref: LabSecurityGroup
+          SubnetId:
+            Ref: LabSubnet
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #!/bin/bash -xe
+            exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+              sudo yum -y update
