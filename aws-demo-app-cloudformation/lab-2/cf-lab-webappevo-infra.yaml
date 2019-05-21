@@ -1,0 +1,279 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Laboratory template for a basic, single server, web architecture
+
+## ############################################################################
+## This file defines a single server with RDS access to deploy a java 
+## application based on Tomcat. It requires the "ewf-lab-context" stack from
+## lab-1.
+##
+## Version : 1.0.0
+## Date    : 21-05-2019
+## Author  : Patricio Téllez (ptellez@amazon.com)
+## ############################################################################
+
+
+## ############################################################################
+## Parameters
+## ############################################################################
+Parameters: 
+  # RDS Master Username
+  RdsMasterUsername:
+    Type: String
+    Description: Specify the master username for the database
+
+  # RDS Master Password
+  RdsMasterPassword:
+    Type: String
+    Description: Specify the master password for the database
+
+
+## ############################################################################
+## Resources
+## ############################################################################
+Resources:
+
+  ## ##########################################################################
+  ## Resources - IAM
+  ## ##########################################################################
+  # Managed Instance Role
+  EwfWebEc2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+              - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonRDSFullAccess
+
+  ## ##########################################################################
+  ## Resources - Networking
+  ## ##########################################################################
+  ## 
+  ## Subnets
+  ##
+  # Public Subnet 1
+  EwfInfraPublicSubnetAz1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !ImportValue EwfVpcName
+      CidrBlock: !Select [ 1, !Cidr [ !ImportValue EwfVpcCidr, 6, 8 ] ]
+      AvailabilityZone: us-east-1b
+      Tags:
+      - Key: Name
+        Value: EWF PublicSubnetAz1
+
+  # Public Subnet 1 - Internet Route
+  EwfSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: EwfInfraPublicSubnetAz1
+      RouteTableId: !ImportValue EwfInternetRouteTable
+
+  # Private subnet-1 for the database
+  EwfRdsPrivateSubnetOne:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !ImportValue EwfVpcName
+      CidrBlock: !Select [ 2, !Cidr [ !ImportValue EwfVpcCidr, 6, 8 ] ]
+      AvailabilityZone: us-east-1c
+      Tags:
+      - Key: Name
+        Value: EWF RDS Private Subnet 1
+
+  # Private subnet-2 for the database
+  EwfRdsPrivateSubnetTwo:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !ImportValue EwfVpcName
+      CidrBlock: !Select [ 3, !Cidr [ !ImportValue EwfVpcCidr, 6, 8 ] ]
+      AvailabilityZone: us-east-1d
+      Tags:
+      - Key: Name
+        Value: EWF RDS Private Subnet 2
+
+  ## 
+  ## Security Groups
+  ##
+  # Web Servers security groups
+  EwfInfraWebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http to client host
+      VpcId: !ImportValue EwfVpcName
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 8080
+        ToPort: 8080
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: -1
+        SourceSecurityGroupId: !ImportValue EwfBastionSecurityGroup
+      SecurityGroupEgress:
+      - IpProtocol: -1
+        CidrIp: 0.0.0.0/0
+      Tags:
+      - Key: Name
+        Value: "ewf-tomcat-web-access"
+
+  # RDS security groups
+  EwfRdsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow web group to access the RDS
+      VpcId: !ImportValue EwfVpcName
+      SecurityGroupIngress:
+      - IpProtocol: -1
+        SourceSecurityGroupId: !Ref EwfInfraWebSecurityGroup
+      SecurityGroupEgress:
+      - IpProtocol: -1
+        CidrIp: 0.0.0.0/0
+      Tags:
+      - Key: Name
+        Value: "ewf-webapp-rds-access"
+
+  ## ##########################################################################
+  ## Resources - RDS
+  ## ##########################################################################
+  #
+  # DB Subnets
+  #
+  EwfRdsPrivateSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: DB Subnet group for web access
+      SubnetIds:
+        - !Ref EwfRdsPrivateSubnetOne
+        - !Ref EwfRdsPrivateSubnetTwo
+      Tags:
+      - Key: Name
+        Value: "ewf-dbsnet-rds"
+
+  #
+  # DB Instances
+  #
+  # This demo has a bad practice since the password of the DB instance is in the
+  # source file, visible to anyone who has access to the template or the GIT
+  # repository. 
+  EwfRdsInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: "webappevolution"
+      Engine: MySQL
+      MasterUsername: !Ref RdsMasterUsername
+      MasterUserPassword: !Ref RdsMasterPassword
+      DBInstanceClass: db.t2.micro
+      DBSubnetGroupName: 
+        Ref: EwfRdsPrivateSubnetGroup
+      VPCSecurityGroups:
+      - Ref: EwfRdsSecurityGroup
+      AllocatedStorage: 5
+    DeletionPolicy: Delete
+
+  ## ##########################################################################
+  ## Resources - Instances
+  ## ##########################################################################
+  # EC2 Instance Profile - IAM
+  EwfEc2WebApplicationInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    DependsOn: EwfWebEc2Role
+    Properties:
+      InstanceProfileName: EwfEc2WebApplicationInstanceProfile
+      Path: /
+      Roles:
+      - Ref: EwfWebEc2Role
+
+  # EC2 Instance for Web Application
+  EwfEc2WebApplicationInstanceOne:
+    Type: AWS::EC2::Instance
+    DependsOn: EwfRdsInstance
+    Properties:
+      ImageId: ami-0de53d8956e8dcf80
+      KeyName: !ImportValue EwfEc2KeyName
+      InstanceType: "t3.small"
+      IamInstanceProfile: !Ref EwfEc2WebApplicationInstanceProfile
+      BlockDeviceMappings: 
+        - DeviceName: /dev/sdm
+          Ebs: 
+            VolumeType: gp2
+            DeleteOnTermination: true
+            VolumeSize: 40
+        - DeviceName: /dev/sdk
+          NoDevice: {}
+      NetworkInterfaces: 
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: 0
+          GroupSet:
+          - Ref: EwfInfraWebSecurityGroup
+          SubnetId:
+            Ref: EwfInfraPublicSubnetAz1
+      UserData:
+        Fn::Base64: !Sub 
+          - |
+            #!/bin/bash -xe
+            exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+              sudo yum -y update
+              sudo yum -y install java-1.8.0 ruby mysql wget
+              sudo useradd -r -m -U -d /opt/tomcat -s /bin/false tomcat
+              wget https://www-us.apache.org/dist/tomcat/tomcat-9/v9.0.19/bin/apache-tomcat-9.0.19.tar.gz -P /tmp
+              sudo tar xf /tmp/apache-tomcat-9*.tar.gz -C /opt/tomcat
+              sudo ln -s /opt/tomcat/apache-tomcat-9.0.19 /opt/tomcat/latest
+              sudo chown -RH tomcat:tomcat /opt/tomcat/latest
+              sudo sh -c 'chmod +x /opt/tomcat/latest/bin/*.sh'
+              sudo echo '[Unit]' > /tmp/tomcat.service
+              sudo echo 'Description=Tomcat 9 servlet container' >> /tmp/tomcat.service
+              sudo echo 'After=network.target' >> /tmp/tomcat.service
+              sudo echo '' >> /tmp/tomcat.service
+              sudo echo '[Service]' >> /tmp/tomcat.service
+              sudo echo 'Type=forking' >> /tmp/tomcat.service
+              sudo echo '' >> /tmp/tomcat.service
+              sudo echo 'User=tomcat' >> /tmp/tomcat.service
+              sudo echo 'Group=tomcat' >> /tmp/tomcat.service
+              sudo echo '' >> /tmp/tomcat.service
+              sudo echo 'Environment="JAVA_HOME=/usr/lib/jvm/jre"' >> /tmp/tomcat.service
+              sudo echo 'Environment="JAVA_OPTS=-Djava.security.egd=file:///dev/urandom -Djava.awt.headless=true"' >> /tmp/tomcat.service
+              sudo echo '' >> /tmp/tomcat.service
+              sudo echo 'Environment="CATALINA_BASE=/opt/tomcat/latest"' >> /tmp/tomcat.service
+              sudo echo 'Environment="CATALINA_HOME=/opt/tomcat/latest"' >> /tmp/tomcat.service
+              sudo echo 'Environment="CATALINA_PID=/opt/tomcat/latest/temp/tomcat.pid"' >> /tmp/tomcat.service
+              sudo echo 'Environment="CATALINA_OPTS=-Xms512M -Xmx1024M -server -XX:+UseParallelGC"' >> /tmp/tomcat.service
+              sudo echo '' >> /tmp/tomcat.service
+              sudo echo 'ExecStart=/opt/tomcat/latest/bin/startup.sh' >> /tmp/tomcat.service
+              sudo echo 'ExecStop=/opt/tomcat/latest/bin/shutdown.sh' >> /tmp/tomcat.service
+              sudo echo '' >> /tmp/tomcat.service
+              sudo echo '[Install]' >> /tmp/tomcat.service
+              sudo echo 'WantedBy=multi-user.target' >> /tmp/tomcat.service
+              sudo mv /tmp/tomcat.service /etc/systemd/system/tomcat.service
+              sudo chown root:root /etc/systemd/system/tomcat.service
+              sudo echo "export RDS_HOSTNAME=${RDS_HOSTNAME}" >> /opt/tomcat/latest/bin/setenv.sh
+              sudo echo "export RDS_PORT=${RDS_PORT}" >> /opt/tomcat/latest/bin/setenv.sh
+              sudo echo "export RDS_DB_NAME=${RDS_DB_NAME}" >> /opt/tomcat/latest/bin/setenv.sh
+              sudo echo "export RDS_USERNAME=${RDS_USERNAME}" >> /opt/tomcat/latest/bin/setenv.sh
+              sudo echo "export RDS_PASSWORD=${RDS_PASSWORD}" >> /opt/tomcat/latest/bin/setenv.sh
+              sudo chown tomcat:tomcat /opt/tomcat/latest/bin/setenv.sh
+              sudo systemctl daemon-reload
+              sudo systemctl start tomcat
+              sudo systemctl enable tomcat
+              cd /home/ec2-user
+              wget https://aws-codedeploy-us-east-1.s3.amazonaws.com/latest/install
+              chmod +x ./install
+              sudo ./install auto
+          - {
+              RDS_HOSTNAME: !GetAtt EwfRdsInstance.Endpoint.Address,
+              RDS_PORT: !GetAtt EwfRdsInstance.Endpoint.Port,
+              RDS_DB_NAME: webappevolution,
+              RDS_USERNAME: !Ref RdsMasterUsername,
+              RDS_PASSWORD: !Ref RdsMasterPassword
+            }
+      Tags:
+      - Key: Name
+        Value: EWF Web Instance One
+      - Key: EwfRole
+        Value: "ewf-web-instance"

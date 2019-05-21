@@ -3,7 +3,8 @@ Description: EWF - Infra Codepipeline for Cloudformation
 
 ## ############################################################################
 ## This file defines a code pipeline workflow to create a cloudformation stack
-## based on the template that is created in the repository.
+## based on the template that is created in the repository. It requires the 
+## "ewf-lab-context" stack from lab-1.
 ##
 ## Version : 1.0.0
 ## Date    : 21-05-2019
@@ -16,7 +17,7 @@ Description: EWF - Infra Codepipeline for Cloudformation
 Resources:
 
   ## ##########################################################################
-  ## Repositories
+  ## Resources - Repositories
   ## ##########################################################################
   # Infrastructure code repository
   EwfInfraRepo:
@@ -27,8 +28,28 @@ Resources:
   
 
   ## ##########################################################################
-  ## Service Roles
+  ## Resources - Service Roles
   ## ##########################################################################
+  # Service Role
+  EwfBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+              - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSCodeCommitFullAccess
+        - arn:aws:iam::aws:policy/CloudWatchFullAccess
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+  
   # Code Pipeline Role
   EwfPipelineRole:
     Type: AWS::IAM::Role
@@ -103,39 +124,41 @@ Resources:
                   - 'iam:*'
                 Resource: '*'
 
-
-  ## ##########################################################################
-  ## Code Build
-  ## ##########################################################################
-  # Code Build
-  EwfInfraCodeBuild:
-    Type: AWS::CodeBuild::Project
+  # Cloudwatch event role
+  EwfInfraCloudWatchEventRole:
+    Type: AWS::IAM::Role
+    DependsOn: EwfInfraWebAppEvoPipeline
     Properties:
-      Name: MonoliticWebApp
-      Description: An example application build for a Java Spring
-      ServiceRole: !GetAtt LabManagedBuildRole.Arn
-      TimeoutInMinutes: 10
-      Source:
-        Type: CODEPIPELINE
-      Environment:
-        Type: LINUX_CONTAINER
-        ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/java:openjdk-8
-        EnvironmentVariables:
-        - Name: S3_ARTIFACT_BUCKET
-          Value: !ImportValue EwfS3CodePipelineBucket
-      Artifacts:
-        Type: CODEPIPELINE
-        
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        -
+          PolicyName: ewf-cwe-infra-pipeline-execution
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Effect: Allow
+                Action: codepipeline:StartPipelineExecution
+                Resource: !Join [ '', [ 'arn:aws:codepipeline:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':ewf-webappevo-infra-codepipeline' ] ] 
+
 
   ## ##########################################################################
-  ## Code Pipeline
+  ## Resources - Code Pipeline
   ## ##########################################################################
   # Ref: https://docs.aws.amazon.com/codepipeline/latest/userguide/reference-pipeline-structure.html#actions-valid-providers
-  LabInfraResourcesPipeline:
+  EwfInfraWebAppEvoPipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
-      Name: webapp-evolution-infra-codepipeline
+      Name: ewf-webappevo-infra-codepipeline
       RoleArn: !GetAtt EwfPipelineRole.Arn
       Stages:
         - Name: Source
@@ -155,7 +178,7 @@ Resources:
               RunOrder: 1
         - Name: Deploy
           Actions:
-            - Name: DeployApplication
+            - Name: CreateInfrastructure
               InputArtifacts:
                 - Name: SourceOutput
               ActionTypeId:
@@ -166,10 +189,42 @@ Resources:
               Configuration:
                 ActionMode: CREATE_UPDATE
                 Capabilities: CAPABILITY_NAMED_IAM
-                StackName: codepipeline-demo-stack-lab3
-                TemplatePath: SourceOutput::cf-webapp-simple-infra.yaml
+                StackName: webappevo-infra-stack
+                TemplatePath: SourceOutput::cf-lab-webappevo-infra.yaml
+                TemplateConfiguration: SourceOutput::cf-lab-webappevo-infra-config.json
                 RoleArn: !GetAtt EwfPipelineRole.Arn
               RunOrder: 1
       ArtifactStore:
         Type: S3
         Location: !ImportValue EwfS3CodePipelineBucket
+
+  ## ##########################################################################
+  ## Resources - Cloudwatch Events
+  ## ##########################################################################
+  # Cloudwatch Events - Infrastructure
+  EwfInfraCloudWatchEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: ewf-infra-update
+      Description: Event rule that updates the infrastructure based on a cloudformation template
+      EventPattern:
+        source:
+          - aws.codecommit
+        detail-type:
+          - 'CodeCommit Repository State Change'
+        resources:
+          - !Join [ '', [ 'arn:aws:codecommit:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':EwfInfraRepo' ] ]
+        detail:
+          event:
+            - referenceCreated
+            - referenceUpdated
+          referenceType:
+            - branch
+          referenceName:
+            - master
+      Targets:
+        -
+          Arn: 
+            !Join [ '', [ 'arn:aws:codepipeline:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':ewf-webappevo-infra-codepipeline' ] ]
+          RoleArn: !GetAtt EwfInfraCloudWatchEventRole.Arn
+          Id: CodePipelineTarget

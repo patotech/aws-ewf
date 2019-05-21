@@ -133,14 +133,14 @@ Resources:
       - Key: Name
         Value: EWF Internet Gateway    
 
-  # Internet Gateway Attachment
+  # Internet Gateway Attachment to the VPC
   EwfLabInternetGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
     Properties: 
       InternetGatewayId: !Ref EwfLabInternetGateway
       VpcId: !Ref EwfLabVpc
 
-  # Public Subnet Route Table
+  # Public Subnet Route Table 
   EwfLabSubNetInternetRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -150,7 +150,7 @@ Resources:
       - Key: Name
         Value: EWF Internet Route Table
 
-  # Internet Route for Public Table
+  # Public Internet Route
   EwfLabRoutePublicInternet:
     Type: AWS::EC2::Route
     DependsOn: EwfLabInternetGateway
@@ -162,7 +162,7 @@ Resources:
         Ref: EwfLabInternetGateway
 
   # Bastion Subnet Internet Route
-  LabSubnetRouteTableAssociation:
+  EwfSubnetRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId:
@@ -189,13 +189,12 @@ Resources:
     Properties:
       ImageId: ami-0c6b1d09930fac512
       KeyName: !Ref BastionSshKey
-      InstanceType: t2.micro
+      InstanceType: t3.medium # It's possible that the instance will be used to build software
       IamInstanceProfile: !Ref EwfBastionInstanceProfile
       BlockDeviceMappings: 
         - DeviceName: /dev/sdm
           Ebs: 
-            VolumeType: io1
-            Iops: 200
+            VolumeType: gp2
             DeleteOnTermination: true
             VolumeSize: 40
         - DeviceName: /dev/sdk
@@ -233,8 +232,9 @@ Resources:
         Value: EWF Bastion Instance
 
   ## ##########################################################################
-  ## Resources - Codepipeline shared bucket
+  ## Resources - S3
   ## ##########################################################################
+  # Shared S3 bucket for Code Pipeline deployments
   EwfCodepipelineS3Bucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Delete
@@ -252,13 +252,39 @@ Outputs:
   EwfVpcName:
     Description: The VPC for all laboratories
     Value: !Ref EwfLabVpc
+    Export:
+      Name: EwfVpcName
+
+  # Lab VPC CIDR
+  EwfVpcCidr:
+    Description: The CIDR of the VPC for all laboratories
+    Value: !Ref VpcCidr
+    Export:
+      Name: EwfVpcCidr
 
   # EC2 KeyPair Name
   EwfEc2KeyName:
     Description: Name of the KeyPair used for any ec2 instance in the labs
     Value: !Ref BastionSshKey
+    Export:
+      Name: EwfEc2KeyName
   
   # Shared S3 bucket for codepipeline
   EwfS3CodePipelineBucket:
     Description: Codepipeline shared s3 bucket for deployments
     Value: !Ref EwfCodepipelineS3Bucket
+    Export:
+      Name: EwfS3CodePipelineBucket
+  
+  # Security Group for Bastion Host - Access to other instances
+  EwfBastionSecurityGroup:
+    Description: Bastion security group
+    Value: !Ref EwfLabSecurityGroup
+    Export:
+      Name: EwfBastionSecurityGroup
+
+  EwfInternetRouteTable:
+    Description: Route Table for Internet Access from web applications
+    Value: !Ref EwfLabSubNetInternetRouteTable
+    Export:
+      Name: EwfInternetRouteTable
