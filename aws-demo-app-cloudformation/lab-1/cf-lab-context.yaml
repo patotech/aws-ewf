@@ -212,9 +212,18 @@ Resources:
               sudo wget http://repos.fedorapeople.org/repos/dchen/apache-maven/epel-apache-maven.repo -O /etc/yum.repos.d/epel-apache-maven.repo
               sudo sed -i s/\$releasever/6/g /etc/yum.repos.d/epel-apache-maven.repo
               sudo yum install -y java-1.8.0-openjdk-devel git apache-maven wget
-              sudo wget https://raw.githubusercontent.com/patotech/aws-ewf/master/aws-demo-app-cloudformation/lab-0/mount-devices.sh
+              sudo wget https://raw.githubusercontent.com/patotech/aws-ewf/master/aws-demo-app-cloudformation/lab-1/mount-devices.sh
               sudo chmod u+x mount-devices.sh
               sudo ./mount-devices.sh
+              sudo wget https://github.com/patotech/aws-ewf/archive/master.zip
+              sudo mv master.zip /mnt/data
+              cd /mnt/data
+              sudo unzip master.zip
+              sudo mv aws-ewf-master aws-ewf
+              sudo chown -R ec2-user:ec2-user aws-ewf
+              sudo rm -f master.zip
+              sudo mkdir /mnt/data/work
+              sudo chown -R ec2-user:ec2-user work
       Tags:
       - Key: Name
         Value: EWF Bastion Instance
@@ -225,8 +234,8 @@ Resources:
 Outputs:
   # Lab VPC
   EwfVpcName:
-    Description: The VPC name for all laboratories
-    Value: !Ref VpcName
+    Description: The VPC for all laboratories
+    Value: !Ref EwfLabVpc
 
   # EC2 KeyPair Name
   EwfEc2KeyName:
