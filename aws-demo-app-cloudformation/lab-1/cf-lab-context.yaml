@@ -38,6 +38,10 @@ Parameters:
     Description: KeyPair to access EC2 instances
     Default: ewf-key
 
+  CodePipelineBucketName:
+    Type: String
+    Description: Codepipeline shared bucket
+
 ## ############################################################################
 ## Resources
 ## ############################################################################
@@ -228,6 +232,18 @@ Resources:
       - Key: Name
         Value: EWF Bastion Instance
 
+  ## ##########################################################################
+  ## Resources - Codepipeline shared bucket
+  ## ##########################################################################
+  EwfCodepipelineS3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Ref CodePipelineBucketName
+      Tags:
+      - Key: Name
+        Value: EWF Codepipeline bucket
+
 ## ############################################################################
 ## Outputs - For the use of other labs
 ## ############################################################################
@@ -242,3 +258,7 @@ Outputs:
     Description: Name of the KeyPair used for any ec2 instance in the labs
     Value: !Ref BastionSshKey
   
+  # Shared S3 bucket for codepipeline
+  EwfS3CodePipelineBucket:
+    Description: Codepipeline shared s3 bucket for deployments
+    Value: !Ref EwfCodepipelineS3Bucket
