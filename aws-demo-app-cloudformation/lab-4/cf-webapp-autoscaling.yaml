@@ -1,0 +1,341 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Laboratory template for a basic web architecture
+
+## ##########################################################################
+## Resources
+## ##########################################################################
+Resources:
+
+  ## ##########################################################################
+  ## Resources - IAM
+  ## ##########################################################################
+  # Managed Instance Role
+  LabWebEc2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+              - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonRDSFullAccess
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+
+  ## ##########################################################################
+  ## Resources - Networking
+  ## ##########################################################################
+  ## 
+  ## VPC Definition
+  ##
+  # VPC for component deployment
+  LabVpc:
+    Type: AWS::EC2::VPC
+    Properties: 
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: false
+      InstanceTenancy: "default"
+      Tags:
+      - Key: Name
+        Value: "vpc-demo-app"
+      - Key: Motif
+        Value: "ewf-lab-4"
+
+  ## 
+  ## Subnets
+  ##
+  # Public subnets for the web application
+  LabPublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: LabVpc
+      CidrBlock: 10.0.0.0/24
+      AvailabilityZone: us-east-1b
+      Tags:
+      - Key: Name
+        Value: "snet-public-demo-app"
+      - Key: Motif
+        Value: "ewf-lab-4"
+
+  # Public subnets for the web application
+  LabPublicSubnetTwo:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: LabVpc
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: us-east-1c
+      Tags:
+      - Key: Name
+        Value: "snet-public-demo-app"
+      - Key: Motif
+        Value: "ewf-lab-4"
+
+  # Private subnet for the database
+  LabPrivateSubnetOne:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: LabVpc
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: us-east-1b
+      Tags:
+      - Key: Name
+        Value: "snet-private-one-demo-app"
+      - Key: Motif
+        Value: "ewf-lab-4"
+
+  LabPrivateSubnetTwo:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: LabVpc
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: us-east-1c
+      Tags:
+      - Key: Name
+        Value: "snet-private-two-demo-app"
+      - Key: Motif
+        Value: "ewf-lab-4"
+
+  ## 
+  ## Security Groups
+  ##
+  # Web Servers security groups
+  LabWebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http to client host
+      VpcId:
+        Ref: LabVpc
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 8080
+        ToPort: 8080
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+      - IpProtocol: -1
+        CidrIp: 0.0.0.0/0
+      Tags:
+      - Key: Name
+        Value: "secgrp-internet-demo-app"
+      - Key: Motif
+        Value: "ewf-lab-4"
+
+  LabRdsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow web group to access the RDS
+      VpcId:
+        Ref: LabVpc
+      SecurityGroupIngress:
+      - IpProtocol: -1
+        SourceSecurityGroupId: !Ref LabWebSecurityGroup
+      SecurityGroupEgress:
+      - IpProtocol: -1
+        CidrIp: 0.0.0.0/0
+      Tags:
+      - Key: Name
+        Value: "secgrp-rds-demo-app"
+      - Key: Motif
+        Value: "ewf-lab-4"
+
+  ## 
+  ## VPC Gateways
+  ##
+  # Internet Gateway
+  LabInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+      - Key: Name
+        Value: "igw-demo-app"
+      - Key: Motif
+        Value: "ewf-lab-4"
+
+  # Internet Gateway Attachment
+  LabInternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: 
+      InternetGatewayId: !Ref LabInternetGateway
+      VpcId: !Ref LabVpc
+
+  # Public Subnet Route Table
+  LabSubNetInternetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: LabVpc
+      Tags:
+      - Key: Name
+        Value: "rt-internet-demo-app"
+      - Key: Motif
+        Value: "ewf-lab-4"
+
+  # Internet Route for Public Table
+  LabRoutePublicInteret:
+    Type: AWS::EC2::Route
+    DependsOn: LabInternetGateway
+    Properties:
+       RouteTableId:
+         Ref: LabSubNetInternetRouteTable
+       DestinationCidrBlock: 0.0.0.0/0
+       GatewayId:
+         Ref: LabInternetGateway
+
+  # Public Subnet Internet Route Association
+  LabPublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: LabPublicSubnet
+      RouteTableId:
+        Ref: LabSubNetInternetRouteTable  
+
+  ## ##########################################################################
+  ## Resources - RDS
+  ## ##########################################################################
+  LabRdsPrivateSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: DB Subnet group for web access
+      SubnetIds:
+        - !Ref LabPrivateSubnetOne
+        - !Ref LabPrivateSubnetTwo
+      Tags:
+      - Key: Name
+        Value: "dbsnet-rds-demo-app"
+      - Key: Motif
+        Value: "ewf-lab-4"
+
+  LabRdsInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: "webappevolution"
+      Engine: MySQL
+      MasterUsername: webappuser
+      MasterUserPassword: Monday123
+      DBInstanceClass: db.t2.micro
+      DBSubnetGroupName: 
+        Ref: LabRdsPrivateSubnetGroup
+      VPCSecurityGroups:
+      - Ref: LabRdsSecurityGroup
+      AllocatedStorage: 5
+    DeletionPolicy: Delete
+
+  ## ##########################################################################
+  ## Resources - Instances
+  ## ##########################################################################
+  # EC2 Instance Profile - IAM
+  LabEc2WebApplicationInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    DependsOn: LabWebEc2Role
+    Properties:
+      InstanceProfileName: LabEc2WebApplicationInstanceProfile
+      Path: /
+      Roles:
+      - Ref: LabWebEc2Role
+
+  # EC2 Instance for Web Application
+  LabEc2WebApplicationInstance:
+    Type: AWS::EC2::Instance
+    DependsOn: LabRdsInstance
+    Properties:
+      ImageId: ami-0de53d8956e8dcf80
+      KeyName: win-home-key-pair-studio
+      InstanceType: "t2.micro"
+      IamInstanceProfile: !Ref LabEc2WebApplicationInstanceProfile
+      BlockDeviceMappings: 
+        - DeviceName: /dev/sdm
+          Ebs: 
+            VolumeType: io1
+            Iops: 200
+            DeleteOnTermination: true
+            VolumeSize: 20
+        - DeviceName: /dev/sdk
+          NoDevice: {}
+      NetworkInterfaces: 
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: 0
+          GroupSet:
+          - Ref: LabWebSecurityGroup
+          SubnetId:
+            Ref: LabPublicSubnet
+      UserData:
+        Fn::Base64: !Sub 
+          - |
+            #!/bin/bash -xe
+            exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+              sudo yum -y update
+              sudo yum -y install java-1.8.0
+              sudo useradd -r -m -U -d /opt/tomcat -s /bin/false tomcat
+              wget https://www-us.apache.org/dist/tomcat/tomcat-9/v9.0.19/bin/apache-tomcat-9.0.19.tar.gz -P /tmp
+              sudo tar xf /tmp/apache-tomcat-9*.tar.gz -C /opt/tomcat
+              sudo ln -s /opt/tomcat/apache-tomcat-9.0.19 /opt/tomcat/latest
+              sudo chown -RH tomcat:tomcat /opt/tomcat/latest
+              sudo sh -c 'chmod +x /opt/tomcat/latest/bin/*.sh'
+              sudo echo '[Unit]' > /tmp/tomcat.service
+              sudo echo 'Description=Tomcat 9 servlet container' >> /tmp/tomcat.service
+              sudo echo 'After=network.target' >> /tmp/tomcat.service
+              sudo echo '' >> /tmp/tomcat.service
+              sudo echo '[Service]' >> /tmp/tomcat.service
+              sudo echo 'Type=forking' >> /tmp/tomcat.service
+              sudo echo '' >> /tmp/tomcat.service
+              sudo echo 'User=tomcat' >> /tmp/tomcat.service
+              sudo echo 'Group=tomcat' >> /tmp/tomcat.service
+              sudo echo '' >> /tmp/tomcat.service
+              sudo echo 'Environment="JAVA_HOME=/usr/lib/jvm/jre"' >> /tmp/tomcat.service
+              sudo echo 'Environment="JAVA_OPTS=-Djava.security.egd=file:///dev/urandom -Djava.awt.headless=true"' >> /tmp/tomcat.service
+              sudo echo '' >> /tmp/tomcat.service
+              sudo echo 'Environment="CATALINA_BASE=/opt/tomcat/latest"' >> /tmp/tomcat.service
+              sudo echo 'Environment="CATALINA_HOME=/opt/tomcat/latest"' >> /tmp/tomcat.service
+              sudo echo 'Environment="CATALINA_PID=/opt/tomcat/latest/temp/tomcat.pid"' >> /tmp/tomcat.service
+              sudo echo 'Environment="CATALINA_OPTS=-Xms512M -Xmx1024M -server -XX:+UseParallelGC"' >> /tmp/tomcat.service
+              sudo echo '' >> /tmp/tomcat.service
+              sudo echo 'ExecStart=/opt/tomcat/latest/bin/startup.sh' >> /tmp/tomcat.service
+              sudo echo 'ExecStop=/opt/tomcat/latest/bin/shutdown.sh' >> /tmp/tomcat.service
+              sudo echo '' >> /tmp/tomcat.service
+              sudo echo '[Install]' >> /tmp/tomcat.service
+              sudo echo 'WantedBy=multi-user.target' >> /tmp/tomcat.service
+              sudo mv /tmp/tomcat.service /etc/systemd/system/tomcat.service
+              sudo chown root:root /etc/systemd/system/tomcat.service
+              sudo echo "export RDS_HOSTNAME=${RDS_HOSTNAME}" >> /opt/tomcat/latest/bin/setenv.sh
+              sudo echo "export RDS_PORT=${RDS_PORT}" >> /opt/tomcat/latest/bin/setenv.sh
+              sudo echo "export RDS_DB_NAME=${RDS_DB_NAME}" >> /opt/tomcat/latest/bin/setenv.sh
+              sudo echo "export RDS_USERNAME=${RDS_USERNAME}" >> /opt/tomcat/latest/bin/setenv.sh
+              sudo echo "export RDS_PASSWORD=${RDS_PASSWORD}" >> /opt/tomcat/latest/bin/setenv.sh
+              sudo chown tomcat:tomcat /opt/tomcat/latest/bin/setenv.sh
+              sudo systemctl daemon-reload
+              sudo systemctl start tomcat
+              sudo systemctl enable tomcat
+              sudo yum install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm
+              sudo yum install -y ruby mysql
+              sudo yum install wget
+              cd /home/ec2-user
+              wget https://aws-codedeploy-us-east-1.s3.amazonaws.com/latest/install
+              chmod +x ./install
+              sudo ./install auto
+          - {
+              RDS_HOSTNAME: !GetAtt LabRdsInstance.Endpoint.Address,
+              RDS_PORT: !GetAtt LabRdsInstance.Endpoint.Port,
+              RDS_DB_NAME: webappevolution,
+              RDS_USERNAME: webappuser,
+              RDS_PASSWORD: Monday123
+            }
+      Tags:
+      - Key: Name
+        Value: "ec2-web-demo-app"
+      - Key: Motif
+        Value: "ewf-lab-4"

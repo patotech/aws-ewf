@@ -240,7 +240,7 @@ Resources:
     DependsOn: LabRdsInstance
     Properties:
       ImageId: ami-0de53d8956e8dcf80
-      KeyName: win-home-key-pair-studio
+      KeyName: ewf-key
       InstanceType: "t2.micro"
       IamInstanceProfile: !Ref LabEc2WebApplicationInstanceProfile
       BlockDeviceMappings: 
@@ -249,7 +249,7 @@ Resources:
             VolumeType: io1
             Iops: 200
             DeleteOnTermination: true
-            VolumeSize: 20
+            VolumeSize: 40
         - DeviceName: /dev/sdk
           NoDevice: {}
       NetworkInterfaces: 
@@ -309,6 +309,7 @@ Resources:
               sudo yum install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm
               sudo yum install -y ruby mysql
               sudo yum install wget
+              sudo yum install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm
               cd /home/ec2-user
               wget https://aws-codedeploy-us-east-1.s3.amazonaws.com/latest/install
               chmod +x ./install

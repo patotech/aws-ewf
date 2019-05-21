@@ -20,7 +20,14 @@ Resources:
     Type: AWS::CodeCommit::Repository
     Properties:
       RepositoryName: LabInfraRepo
-      RepositoryDescription: Git Repository for infrastructure templates
+      RepositoryDescription: Git Repository for application sources
+
+  # Code Repository
+  LabCloudformationRepo:
+    Type: AWS::CodeCommit::Repository
+    Properties:
+      RepositoryName: LabCloudformationRepo
+      RepositoryDescription: Git Repository for cloudformation templates
   
   # Service Role
   LabManagedBuildRole:
@@ -74,6 +81,7 @@ Resources:
             Principal:
               Service:
                 - codepipeline.amazonaws.com
+                - cloudformation.amazonaws.com
             Action: 'sts:AssumeRole'
       Path: /
       Policies:
@@ -133,7 +141,42 @@ Resources:
                   - 'rds:*'
                   - 'sqs:*'
                   - 'ecs:*'
+                  - 'iam:*'
                 Resource: '*'
+
+  LabCloudWatchEventRole:
+    Type: AWS::IAM::Role
+    DependsOn: LabInfraCodePipeline
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        -
+          PolicyName: cwe-pipeline-execution-app-lab3
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Effect: Allow
+                Action: codepipeline:StartPipelineExecution
+                Resource: !Join [ '', [ 'arn:aws:codepipeline:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':webapp-evolution-app-codepipeline' ] ] 
+        -
+          PolicyName: cwe-pipeline-execution-infra-lab3
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Effect: Allow
+                Action: codepipeline:StartPipelineExecution
+                Resource: !Join [ '', [ 'arn:aws:codepipeline:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':webapp-evolution-infra-codepipeline' ] ] 
 
   # Code Build
   LabInfraCodeBuild:
@@ -196,7 +239,7 @@ Resources:
               Configuration:
                 BranchName: master
                 RepositoryName: LabInfraRepo
-                PollForSourceChanges: true
+                PollForSourceChanges: false
               RunOrder: 1
         - Name: Build
           Actions:
@@ -231,8 +274,107 @@ Resources:
         Type: S3
         Location: !Ref LabAppS3Bucket
 
+  LabInfraResourcesPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: webapp-evolution-infra-codepipeline
+      RoleArn: !GetAtt LabManagedPipelineRole.Arn
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Checkout
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: 1
+                Provider: CodeCommit
+              OutputArtifacts:
+                - Name: SourceOutput
+              Configuration:
+                BranchName: master
+                RepositoryName: LabCloudformationRepo
+                PollForSourceChanges: false
+              RunOrder: 1
+        - Name: Deploy
+          Actions:
+            - Name: DeployApplication
+              InputArtifacts:
+                - Name: SourceOutput
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CloudFormation
+              Configuration:
+                ActionMode: CREATE_UPDATE
+                Capabilities: CAPABILITY_NAMED_IAM
+                StackName: codepipeline-demo-stack-lab3
+                TemplatePath: SourceOutput::cf-webapp-simple-infra.yaml
+                RoleArn: !GetAtt LabManagedPipelineRole.Arn
+              RunOrder: 1
+      ArtifactStore:
+        Type: S3
+        Location: !Ref LabAppS3Bucket
 
   LabAppS3Bucket:
     Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
     Properties:
       BucketName: !Ref AppBucketName
+
+  # 
+  # Cloudwatch Events
+  AmazonCloudWatchEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: event-sourcecode-update
+      Description: Event rule that reacts to changes in the lab application source code commit, to then deploy to the infra
+      EventPattern:
+        source:
+          - aws.codecommit
+        detail-type:
+          - 'CodeCommit Repository State Change'
+        resources:
+          - !Join [ '', [ 'arn:aws:codecommit:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':LabInfraRepo' ] ]
+        detail:
+          event:
+            - referenceCreated
+            - referenceUpdated
+          referenceType:
+            - branch
+          referenceName:
+            - master
+      Targets:
+        -
+          Arn: 
+            !Join [ '', [ 'arn:aws:codepipeline:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':webapp-evolution-app-codepipeline' ] ]
+          RoleArn: !GetAtt LabCloudWatchEventRole.Arn
+          Id: CodePipelineTarget
+
+  # Cloudwatch Events - Infrastructure
+  AmazonCloudWatchEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: event-cloudformation-update
+      Description: Event rule that updates the infrastructure based on a cloudformation template
+      EventPattern:
+        source:
+          - aws.codecommit
+        detail-type:
+          - 'CodeCommit Repository State Change'
+        resources:
+          - !Join [ '', [ 'arn:aws:codecommit:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':LabCloudformationRepo' ] ]
+        detail:
+          event:
+            - referenceCreated
+            - referenceUpdated
+          referenceType:
+            - branch
+          referenceName:
+            - master
+      Targets:
+        -
+          Arn: 
+            !Join [ '', [ 'arn:aws:codepipeline:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':webapp-evolution-infra-codepipeline' ] ]
+          RoleArn: !GetAtt LabCloudWatchEventRole.Arn
+          Id: CodePipelineTarget
