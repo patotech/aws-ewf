@@ -1,4 +1,6 @@
 {
-    "RdsMasterUsername" : "webappevolution",
-    "RdsMasterPassword" : "Monday123"
+    "Parameters" : {
+        "RdsMasterUsername" : "webappevolution",
+        "RdsMasterPassword" : "Monday123"
+    }
 }
