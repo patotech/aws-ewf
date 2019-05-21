@@ -192,7 +192,7 @@ Resources:
       InstanceType: t3.medium # It's possible that the instance will be used to build software
       IamInstanceProfile: !Ref EwfBastionInstanceProfile
       BlockDeviceMappings: 
-        - DeviceName: /dev/sdm
+        - DeviceName: /dev/xvdb
           Ebs: 
             VolumeType: gp2
             DeleteOnTermination: true
