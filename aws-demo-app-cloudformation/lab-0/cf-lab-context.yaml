@@ -1,0 +1,235 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: EWF - Labs context
+
+## ############################################################################
+## This file defines some common parameters for the whole group of laboratories
+## that conform the EWF workshop.
+##
+## Version : 1.0.0
+## Date    : 21-05-2019
+## Author  : Patricio Téllez (ptellez@amazon.com)
+## ############################################################################
+
+## ############################################################################
+## Parameters
+## ############################################################################
+Parameters: 
+  # Main VPC name for the labs
+  VpcName:
+    Type: String
+    Description: Specify the VPC name as visible in the console
+    Default: ewf-lab-vpc
+  
+  # Main VPC CIDR
+  VpcCidr:
+    Type: String
+    Description: Specify the CIDR for the lab VPC
+    Default: 10.0.0.0/16
+
+  # Bastion Host specific info
+  BastionSubnetAz:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Description: | 
+      Specify the subnet in wich the bastion host for the lab is going to 
+      be present.
+    
+  BastionSshKey:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: KeyPair to access EC2 instances
+    Default: ewf-key
+
+## ############################################################################
+## Resources
+## ############################################################################
+Resources:
+  ## ##########################################################################
+  ## Resources - IAM
+  ## ##########################################################################
+  # Bastion Instance Full Admin
+  EwfBastionInstanceAdminRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+              - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+
+  ## ##########################################################################
+  ## Resources - Networking
+  ## ##########################################################################
+  ## 
+  ## VPC Definition
+  ##
+  # Main VPC for all the laboratories
+  EwfLabVpc:
+    Type: AWS::EC2::VPC
+    Properties: 
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      InstanceTenancy: default
+      Tags:
+      - Key: Name
+        Value: !Ref VpcName
+  
+  ## 
+  ## Subnets
+  ##
+  # Public subnet for the bastion host
+  EwfLabBastionSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: EwfLabVpc
+      CidrBlock: !Select [ 0, !Cidr [ !GetAtt EwfLabVpc.CidrBlock, 6, 8 ] ]
+      AvailabilityZone: us-east-1a
+      Tags:
+      - Key: Name
+        Value: EWF Bastion Subnet
+
+  ## 
+  ## Security Groups
+  ##
+  # Bastion security group
+  EwfLabSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow traffic from Internet to instance using SSH
+      VpcId:
+        Ref: EwfLabVpc
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+      - IpProtocol: -1
+        CidrIp: 0.0.0.0/0
+      Tags:
+      - Key: Name
+        Value: EWF Bastion Security Group
+
+  ## 
+  ## VPC Gateways
+  ##
+  # Internet Gateway
+  EwfLabInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+      - Key: Name
+        Value: EWF Internet Gateway    
+
+  # Internet Gateway Attachment
+  EwfLabInternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: 
+      InternetGatewayId: !Ref EwfLabInternetGateway
+      VpcId: !Ref EwfLabVpc
+
+  # Public Subnet Route Table
+  EwfLabSubNetInternetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: EwfLabVpc
+      Tags:
+      - Key: Name
+        Value: EWF Internet Route Table
+
+  # Internet Route for Public Table
+  EwfLabRoutePublicInternet:
+    Type: AWS::EC2::Route
+    DependsOn: EwfLabInternetGateway
+    Properties:
+      RouteTableId:
+        Ref: EwfLabSubNetInternetRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: EwfLabInternetGateway
+
+  # Bastion Subnet Internet Route
+  LabSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: EwfLabBastionSubnet
+      RouteTableId:
+        Ref: EwfLabSubNetInternetRouteTable        
+
+  ## ##########################################################################
+  ## Resources - EC2
+  ## ##########################################################################
+  # EC2 Instance Profile - IAM
+  EwfBastionInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    DependsOn: EwfBastionInstanceAdminRole
+    Properties:
+      InstanceProfileName: LabEc2WebApplicationInstanceProfile
+      Path: /
+      Roles:
+      - Ref: EwfBastionInstanceAdminRole
+
+  # EC2 Instance for the Bastion Instance
+  LabEc2BastionInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0c6b1d09930fac512
+      KeyName: !Ref BastionSshKey
+      InstanceType: t2.micro
+      IamInstanceProfile: !Ref EwfBastionInstanceProfile
+      BlockDeviceMappings: 
+        - DeviceName: /dev/sdm
+          Ebs: 
+            VolumeType: io1
+            Iops: 200
+            DeleteOnTermination: true
+            VolumeSize: 40
+        - DeviceName: /dev/sdk
+          NoDevice: {}
+      NetworkInterfaces: 
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: 0
+          GroupSet:
+          - Ref: EwfLabSecurityGroup
+          SubnetId:
+            Ref: EwfLabBastionSubnet
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #!/bin/bash -xe
+            exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+              sudo yum -y update
+              sudo wget http://repos.fedorapeople.org/repos/dchen/apache-maven/epel-apache-maven.repo -O /etc/yum.repos.d/epel-apache-maven.repo
+              sudo sed -i s/\$releasever/6/g /etc/yum.repos.d/epel-apache-maven.repo
+              sudo yum install -y java-1.8.0-openjdk-devel git apache-maven wget
+              sudo wget https://raw.githubusercontent.com/patotech/aws-ewf/master/aws-demo-app-cloudformation/lab-0/mount-devices.sh
+              sudo chmod u+x mount-devices.sh
+              sudo ./mount-devices.sh
+      Tags:
+      - Key: Name
+        Value: EWF Bastion Instance
+
+## ############################################################################
+## Outputs - For the use of other labs
+## ############################################################################
+Outputs:
+  # Lab VPC
+  EwfVpcName:
+    Description: The VPC name for all laboratories
+    Value: !Ref VpcName
+
+  # EC2 KeyPair Name
+  EwfEc2KeyName:
+    Description: Name of the KeyPair used for any ec2 instance in the labs
+    Value: !Ref BastionSshKey
+  
