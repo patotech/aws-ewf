@@ -10,10 +10,10 @@ Resources:
   ## Resources - Repository
   ## ########################################################################
   # Code Repository
-  EwsWebAppEvolutionRepo:
+  EwfWebAppEvolutionRepo:
     Type: AWS::CodeCommit::Repository
     Properties:
-      RepositoryName: EwsWebAppEvolutionRepo
+      RepositoryName: EwfWebAppEvolutionRepo
       RepositoryDescription: Git Repository for the Java application
 
   ## ########################################################################
@@ -134,7 +134,7 @@ Resources:
                 Resource: '*'
 
   # Cloudwatch Event Role
-  EwsCloudWatchEventAppRole:
+  EwfCloudWatchEventAppRole:
     Type: AWS::IAM::Role
     DependsOn: EwfWebAppEvolutionPipeline
     Properties:
@@ -157,7 +157,7 @@ Resources:
               -
                 Effect: Allow
                 Action: codepipeline:StartPipelineExecution
-                Resource: !Join [ '', [ 'arn:aws:codepipeline:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':webapp-evolution-codepipeline' ] ] 
+                Resource: !Join [ '', [ 'arn:aws:codepipeline:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':ewf-webappevo-codepipeline' ] ] 
 
   ## ########################################################################
   ## Resources - Code Build
@@ -228,7 +228,7 @@ Resources:
                 - Name: SourceOutput
               Configuration:
                 BranchName: master
-                RepositoryName: EwsWebAppEvolutionRepo
+                RepositoryName: EwfWebAppEvolutionRepo
                 PollForSourceChanges: false
               RunOrder: 1
         - Name: Build
@@ -278,7 +278,7 @@ Resources:
         detail-type:
           - 'CodeCommit Repository State Change'
         resources:
-          - !Join [ '', [ 'arn:aws:codecommit:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':EwsWebAppEvolutionRepo' ] ]
+          - !Join [ '', [ 'arn:aws:codecommit:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':EwfWebAppEvolutionRepo' ] ]
         detail:
           event:
             - referenceCreated
@@ -291,5 +291,5 @@ Resources:
         -
           Arn: 
             !Join [ '', [ 'arn:aws:codepipeline:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':ewf-webappevo-codepipeline' ] ]
-          RoleArn: !GetAtt EwsCloudWatchEventAppRole.Arn
+          RoleArn: !GetAtt EwfCloudWatchEventAppRole.Arn
           Id: CodePipelineTarget
