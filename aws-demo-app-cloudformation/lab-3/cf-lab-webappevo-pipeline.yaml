@@ -290,6 +290,6 @@ Resources:
       Targets:
         -
           Arn: 
-            !Join [ '', [ 'arn:aws:codepipeline:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':webapp-evolution-codepipeline' ] ]
+            !Join [ '', [ 'arn:aws:codepipeline:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':ewf-webappevo-codepipeline' ] ]
           RoleArn: !GetAtt EwsCloudWatchEventAppRole.Arn
           Id: CodePipelineTarget
