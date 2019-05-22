@@ -1,0 +1,295 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Laboratory for creating a Code Pipeline to deploy a web app
+
+## ##########################################################################
+## Resources
+## ##########################################################################
+Resources:
+
+  ## ########################################################################
+  ## Resources - Repository
+  ## ########################################################################
+  # Code Repository
+  EwsWebAppEvolutionRepo:
+    Type: AWS::CodeCommit::Repository
+    Properties:
+      RepositoryName: EwsWebAppEvolutionRepo
+      RepositoryDescription: Git Repository for the Java application
+
+  ## ########################################################################
+  ## Resources - Roles
+  ## ########################################################################
+  # Code Build Role
+  EwfWebAppEvolutionBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+              - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSCodeCommitFullAccess
+        - arn:aws:iam::aws:policy/CloudWatchFullAccess
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+
+  # Code Deploy Role
+  EwfWebAppEvolutionDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+              - codedeploy.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSCodeCommitFullAccess
+        - arn:aws:iam::aws:policy/CloudWatchFullAccess
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole
+
+  # Code Pipeline Execution Role
+  EwfCodePipelineExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: EWF-WebAppEvolution-Pipeline-Execution-Role
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'codecommit:CancelUploadArchive'
+                  - 'codecommit:GetBranch'
+                  - 'codecommit:GetCommit'
+                  - 'codecommit:GetUploadArchiveStatus'
+                  - 'codecommit:UploadArchive'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'codedeploy:CreateDeployment'
+                  - 'codedeploy:GetApplicationRevision'
+                  - 'codedeploy:GetDeployment'
+                  - 'codedeploy:GetDeploymentConfig'
+                  - 'codedeploy:RegisterApplicationRevision'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'codebuild:BatchGetBuilds'
+                  - 'codebuild:StartBuild'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'devicefarm:ListProjects'
+                  - 'devicefarm:ListDevicePools'
+                  - 'devicefarm:GetRun'
+                  - 'devicefarm:GetUpload'
+                  - 'devicefarm:CreateUpload'
+                  - 'devicefarm:ScheduleRun'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'lambda:InvokeFunction'
+                  - 'lambda:ListFunctions'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'iam:PassRole'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'elasticbeanstalk:*'
+                  - 'ec2:*'
+                  - 'elasticloadbalancing:*'
+                  - 'autoscaling:*'
+                  - 'cloudwatch:*'
+                  - 's3:*'
+                  - 'sns:*'
+                  - 'cloudformation:*'
+                  - 'rds:*'
+                  - 'sqs:*'
+                  - 'ecs:*'
+                  - 'iam:*'
+                Resource: '*'
+
+  # Cloudwatch Event Role
+  EwsCloudWatchEventAppRole:
+    Type: AWS::IAM::Role
+    DependsOn: EwfWebAppEvolutionPipeline
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        -
+          PolicyName: ewf-webapp-evolution-pipeline-execution
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Effect: Allow
+                Action: codepipeline:StartPipelineExecution
+                Resource: !Join [ '', [ 'arn:aws:codepipeline:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':webapp-evolution-codepipeline' ] ] 
+
+  ## ########################################################################
+  ## Resources - Code Build
+  ## ########################################################################
+  # Code Build
+  EwfWebAppEvolutionBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: EwfWebAppEvolutionBuild
+      Description: An example application build for a Java Spring
+      ServiceRole: !GetAtt EwfWebAppEvolutionBuildRole.Arn
+      TimeoutInMinutes: 10
+      Source:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/java:openjdk-8
+        EnvironmentVariables:
+        - Name: S3_ARTIFACT_BUCKET
+          Value: !ImportValue EwfS3CodePipelineBucket
+      Artifacts:
+        Type: CODEPIPELINE
+
+  ## ########################################################################
+  ## Resources - Code Deploy
+  ## ########################################################################
+  # Code Deploy
+  EwfWebAppEvolutionDeployApplication:
+    Type: AWS::CodeDeploy::Application
+    Properties:
+      ApplicationName: webapp-evolution
+      ComputePlatform: Server
+  
+  # Code Deploy: Deployment Group
+  EwfWebAppEvolutionDeploymentGroup:
+    Type: AWS::CodeDeploy::DeploymentGroup
+    DependsOn: EwfWebAppEvolutionDeployApplication
+    Properties:
+      ApplicationName: !Ref EwfWebAppEvolutionDeployApplication
+      DeploymentGroupName: webapp-evolution-deployment-group
+      Ec2TagFilters:
+        - Type: KEY_AND_VALUE
+          Key: EwfRole
+          Value: ewf-web-instance
+      ServiceRoleArn: !GetAtt EwfWebAppEvolutionDeployRole.Arn
+
+  ## ########################################################################
+  ## Resources - Code Pipeline
+  ## ########################################################################
+  # Code Pipeline
+  # Ref: https://docs.aws.amazon.com/codepipeline/latest/userguide/reference-pipeline-structure.html#actions-valid-providers
+  EwfWebAppEvolutionPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: ewf-webappevo-codepipeline
+      RoleArn: !GetAtt EwfCodePipelineExecutionRole.Arn
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Checkout
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: 1
+                Provider: CodeCommit
+              OutputArtifacts:
+                - Name: SourceOutput
+              Configuration:
+                BranchName: master
+                RepositoryName: EwsWebAppEvolutionRepo
+                PollForSourceChanges: false
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: BuildApplication
+              InputArtifacts:
+                - Name: SourceOutput
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              OutputArtifacts:
+                - Name: CompiledApplication
+              Configuration:
+                ProjectName: !Ref EwfWebAppEvolutionBuild
+              RunOrder: 1
+        - Name: Deploy
+          Actions:
+            - Name: DeployApplication
+              InputArtifacts:
+                - Name: CompiledApplication
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CodeDeploy
+              Configuration:
+                ApplicationName: !Ref EwfWebAppEvolutionDeployApplication
+                DeploymentGroupName: !Ref EwfWebAppEvolutionDeploymentGroup                
+              RunOrder: 1
+      ArtifactStore:
+        Type: S3
+        Location: !ImportValue EwfS3CodePipelineBucket
+
+  ## ########################################################################
+  ## Resources - Cloudwatch Events
+  ## ########################################################################
+  AmazonCloudWatchEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: event-webappevolution-update
+      Description: Event rule that reacts to changes in the lab application source code commit, to then deploy to the infra
+      EventPattern:
+        source:
+          - aws.codecommit
+        detail-type:
+          - 'CodeCommit Repository State Change'
+        resources:
+          - !Join [ '', [ 'arn:aws:codecommit:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':EwsWebAppEvolutionRepo' ] ]
+        detail:
+          event:
+            - referenceCreated
+            - referenceUpdated
+          referenceType:
+            - branch
+          referenceName:
+            - master
+      Targets:
+        -
+          Arn: 
+            !Join [ '', [ 'arn:aws:codepipeline:', !Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':webapp-evolution-codepipeline' ] ]
+          RoleArn: !GetAtt EwsCloudWatchEventAppRole.Arn
+          Id: CodePipelineTarget

@@ -52,6 +52,7 @@ Resources:
       Path: /
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonRDSFullAccess
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess # Needed to pull deploy binaries
 
   ## ##########################################################################
   ## Resources - Networking

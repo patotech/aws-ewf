@@ -65,7 +65,7 @@ Resources:
             Action: 'sts:AssumeRole'
       Path: /
       Policies:
-        - PolicyName: AWS-CodePipeline-Service-3
+        - PolicyName: EWF-WebAppEvolution-Infra-Pipeline-Execution-Role
           PolicyDocument:
             Version: 2012-10-17
             Statement:
@@ -189,7 +189,7 @@ Resources:
               Configuration:
                 ActionMode: CREATE_UPDATE
                 Capabilities: CAPABILITY_NAMED_IAM
-                StackName: webappevo-infra-stack
+                StackName: ewf-lab-infra-stack-webappevo
                 TemplatePath: SourceOutput::cf-lab-webappevo-infra.yaml
                 TemplateConfiguration: SourceOutput::cf-lab-webappevo-infra-config.json
                 RoleArn: !GetAtt EwfPipelineRole.Arn

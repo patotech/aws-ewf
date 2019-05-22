@@ -184,7 +184,7 @@ Resources:
       - Ref: EwfBastionInstanceAdminRole
 
   # EC2 Instance for the Bastion Instance
-  LabEc2BastionInstance:
+  EwfEc2BastionInstance:
     Type: AWS::EC2::Instance
     Properties:
       ImageId: ami-0c6b1d09930fac512
