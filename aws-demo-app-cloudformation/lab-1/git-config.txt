@@ -1,0 +1,4 @@
+Host git-codecommit.us-east-1.amazonaws.com
+	HostName git-codecommit.us-east-1.amazonaws.com
+	IdentityFile "~/.ssh/id_rsa"
+	User SSH_PUBLIC_KEY_ID
