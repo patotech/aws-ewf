@@ -1,0 +1,13 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Template to create a test code commit repository
+
+## ##########################################################################
+## Resources
+## ##########################################################################
+Resources:
+
+  TestRepository:
+    Type: AWS::CodeCommit::Repository
+    Properties:
+      RepositoryName: TestRepository
+      RepositoryDescription: Git Repository to test client conectivity
